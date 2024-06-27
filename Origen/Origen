@@ -1,1 +1,196 @@
 Software que esta utilizando nuestro vehiculo en la competicion
+
+#include <Servo.h>
+#include <Adafruit_TCS34725.h>
+#include <NewPing.h>
+
+// Pines del motor
+const int motorPin1 = 9;  // IN1 del L298N
+const int motorPin2 = 10; // IN2 del L298N
+const int enablePin = 11; // ENA del L298N
+
+// Constante de velocidad
+const int motorSpeed = 200; // Cambia este valor para ajustar la velocidad
+
+// Servo
+Servo steeringServo;
+const int servoPin = 6;
+
+// Sensor de color
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
+
+// Sensor de sonido
+#define TRIGGER_PIN  12
+#define ECHO_PIN     13
+#define MAX_DISTANCE 200
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
+
+// Botón
+const int buttonPin = 7;  // Botón pulsador
+int buttonState = 0;
+int lastButtonState = 0;
+
+// Estado del programa
+bool programRunning = false;
+
+// Variable para verificar si hay obstáculo
+bool obstacleDetected = false;
+
+// Contadores para colores
+int orangeCount = 0;
+int blueCount = 0;
+unsigned long moveStartTime = 0;
+
+void setup() {
+  // Configurar pines del motor
+  pinMode(motorPin1, OUTPUT);
+  pinMode(motorPin2, OUTPUT);
+  pinMode(enablePin, OUTPUT);
+
+  // Configurar servo
+  steeringServo.attach(servoPin);
+
+  // Inicializar sensor de color
+  if (!tcs.begin()) {
+    Serial.println("No se encontró el sensor TCS34725 ... Verifique sus conexiones");
+    while (1);
+  }
+
+  // Inicializar comunicación serial
+  Serial.begin(9600);
+
+  // Configurar botón
+  pinMode(buttonPin, INPUT);
+}
+
+void loop() {
+  // Leer estado del botón
+  buttonState = digitalRead(buttonPin);
+
+  // Verificar si se presionó el botón (flanco de bajada)
+  if (buttonState == LOW && lastButtonState == HIGH) {
+    programRunning = !programRunning; // Invertir estado del programa al presionar el botón
+    if (programRunning) {
+      Serial.println("Programa iniciado");
+    } else {
+      Serial.println("Programa detenido");
+      stopMovement(); // Detener el movimiento si se detiene el programa
+    }
+  }
+
+  // Actualizar estado anterior del botón
+  lastButtonState = buttonState;
+
+  // Ejecutar el programa si está activo y hay un obstáculo detectado
+  if (programRunning && obstacleDetected()) {
+    // Leer sensor de color
+    uint16_t r, g, b, c;
+    tcs.getRawData(&r, &g, &b, &c);
+
+    // Evitar obstáculo verde
+    if (isGreen(r, g, b)) {
+      avoidGreen();
+    }
+    // Evitar obstáculo rojo
+    else if (isRed(r, g, b)) {
+      avoidRed();
+    }
+    // Verificar detección de naranja
+    else if (isOrange(r, g, b)) {
+      orangeCount++; // Incrementar contador de naranja
+      if (orangeCount >= 12) { // Si detecta naranja 12 veces
+        delay(100); // Esperar 100ms
+        steeringServo.write(180); // Girar a la derecha
+        delay(500); // Esperar 500ms
+        stopMovement(); // Detener movimiento
+        programRunning = false; // Detener el programa
+      } else {
+        // Esperar 100ms y girar a la derecha
+        delay(100);
+        steeringServo.write(180);
+      }
+    } else if (blueCount == 0 && !isOrange(r, g, b)) {
+      // Si no ha detectado azul y no detecta naranja, evaluar azul
+      if (isBlue(r, g, b)) {
+        blueCount++; // Incrementar contador de azul
+        if (blueCount >= 12) { // Si detecta azul 12 veces
+          delay(100); // Esperar 100ms
+          steeringServo.write(0); // Girar a la izquierda
+          delay(500); // Esperar 500ms
+          stopMovement(); // Detener movimiento
+          programRunning = false; // Detener el programa
+        } else {
+          // Esperar 100ms y girar a la izquierda
+          delay(100);
+          steeringServo.write(0);
+        }
+      } else {
+        // Si no detecta ningún color específico, avanzar
+        moveForward();
+      }
+    } else {
+      // Si ya detectó azul o no se cumplen las condiciones anteriores, avanzar
+      moveForward();
+    }
+  }
+
+  delay(100);
+}
+
+bool isOrange(uint16_t r, uint16_t g, uint16_t b) {
+  // Función para verificar si el color es naranja
+  return (r > 150 && g > 100 && b < 80);
+}
+
+bool isBlue(uint16_t r, uint16_t g, uint16_t b) {
+  // Función para verificar si el color es azul
+  return (r < 100 && g < 100 && b > 150);
+}
+
+bool isGreen(uint16_t r, uint16_t g, uint16_t b) {
+  // Función para verificar si el color es verde
+  return (r < 100 && g > 150 && b < 100);
+}
+
+bool isRed(uint16_t r, uint16_t g, uint16_t b) {
+  // Función para verificar si el color es rojo
+  return (r > 150 && g < 100 && b < 100);
+}
+
+bool obstacleDetected() {
+  // Función para verificar si hay un obstáculo detectado por el sensor ultrasónico
+  unsigned int distance = sonar.ping_cm();
+  return (distance < 20 && distance > 0); // Devuelve true si hay un obstáculo a menos de 20cm
+}
+
+void avoidGreen() {
+  // Función para evitar el color verde (girar a la izquierda)
+  analogWrite(enablePin, 0); // Detener motor
+  delay(500);
+  steeringServo.write(0); // Girar a la izquierda
+  delay(1000);
+  moveForward();
+}
+
+void avoidRed() {
+  // Función para evitar el color rojo (girar a la derecha)
+  analogWrite(enablePin, 0); // Detener motor
+  delay(500);
+  steeringServo.write(180); // Girar a la derecha
+  delay(1000);
+  moveForward();
+}
+
+void moveForward() {
+  // Función para mover hacia adelante
+  digitalWrite(motorPin1, HIGH);
+  digitalWrite(motorPin2, LOW);
+  analogWrite(enablePin, motorSpeed);
+}
+
+void stopMovement() {
+  // Función para detener el movimiento
+  digitalWrite(motorPin1, LOW);
+  digitalWrite(motorPin2, LOW);
+  analogWrite(enablePin, 0);
+}
