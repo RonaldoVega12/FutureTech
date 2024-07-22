@@ -1,1 +1,59 @@
+//Programa de Future Tech 2024
+#include <Servo.h>
+#include <NewPing.h>
 
+const int motorPin1 = 3;
+const int enablePin = 6; // Habilitar motor
+const int motorSpeed = 200; // Velocidad del motor
+Servo steeringServo;
+const int servoPin = 11; // Pin del servo
+
+#define TRIGGER_PIN 12
+#define ECHO_PIN 13
+#define MAX_DISTANCE 5 // Cambiar la distancia máxima de detección a 5 cm
+
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
+
+void setup() {
+  pinMode(motorPin1, OUTPUT);
+  pinMode(enablePin, OUTPUT);
+
+  steeringServo.attach(servoPin);
+  digitalWrite(enablePin, HIGH); // Habilitar el motor
+}
+
+void loop() {
+  steeringServo.write(90); // Establecer la dirección inicial del volante a recto
+  delay(500);
+
+  analogWrite(motorPin1, motorSpeed); // Mover hacia adelante con la velocidad especificada
+  delay(3000);
+
+  // Primero, gira a la izquierda
+  steeringServo.write(0);
+  delay(300);
+  
+  int direccion = 0; // Inicialmente gira a la izquierda
+
+  // Verificar si hay un obstáculo después de girar a la izquierda
+  if (obstacleDetected()) {
+    direccion = 180; // Si hay un obstáculo, cambiar la dirección a 180 grados (giro a la derecha)
+  }
+
+  // Realizar los giros en la dirección determinada
+  realizarGiros(direccion, 3);
+}
+
+bool obstacleDetected() {
+  unsigned int distancia = sonar.ping_cm();
+  return distancia > 0 && distancia < MAX_DISTANCE;
+}
+
+void realizarGiros(int direccion, int giros) {
+  for (int i = 0; i < giros; i++) {
+    steeringServo.write(direccion); // Girar
+    delay(300);
+    steeringServo.write(90); // Volver a recto
+    delay(5000);
+  }
+}
